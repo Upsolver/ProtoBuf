@@ -16,6 +16,14 @@ namespace SilentOrbit.ProtocolBuffers
             return Encoding.UTF8.GetString(bytes, 0, bytes.Length);
         }
 
+        public static string ReadString(byte[] buffer, ref int offset)
+        {
+            var length = (int) ReadUInt32(buffer, ref offset);
+            var value = Encoding.UTF8.GetString(buffer, offset, length);
+            offset += length;
+            return value;
+        }
+
         /// <summary>
         /// Reads a length delimited byte array
         /// </summary>
@@ -35,6 +43,21 @@ namespace SilentOrbit.ProtocolBuffers
                 read += r;
             }
             return buffer;
+        }
+
+        /// <summary>
+        /// Reads a length delimited byte array
+        /// </summary>
+        public static byte[] ReadBytes(byte[] buffer, ref int offset)
+        {
+            //VarInt length
+            int length = (int)ReadUInt32(buffer, ref offset);
+
+            //Bytes
+            byte[] value = new byte[length];
+            Array.Copy(buffer, offset, value, 0, value.Length);
+            offset += value.Length;
+            return value;
         }
 
         /// <summary>

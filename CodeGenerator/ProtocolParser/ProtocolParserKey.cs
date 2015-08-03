@@ -147,6 +147,85 @@ namespace SilentOrbit.ProtocolBuffers
             }
         }
 
+        public static Key ReadKey(byte[] buffer, ref int offset)
+        {
+            uint n = ReadUInt32(buffer, ref offset);
+            return new Key(n >> 3, (Wire)(n & 0x07));
+        }
+
+        public static Key ReadKey(byte firstByte, byte[] buffer, ref int offset)
+        {
+            if (firstByte < 128)
+                return new Key((uint)(firstByte >> 3), (Wire)(firstByte & 0x07));
+            uint fieldID = ((uint)ReadUInt32(buffer, ref offset) << 4) | ((uint)(firstByte >> 3) & 0x0F);
+            return new Key(fieldID, (Wire)(firstByte & 0x07));
+        }
+
+        /// <summary>
+        /// Seek past the value for the previously read key.
+        /// </summary>
+        public static void SkipKey(byte[] buffer, ref int offset, Key key)
+        {
+            switch (key.WireType)
+            {
+                case Wire.Fixed32:
+                    offset += 4;
+                    return;
+                case Wire.Fixed64:
+                    offset += 8;
+                    return;
+                case Wire.LengthDelimited:
+                    offset += (int)ProtocolParser.ReadUInt32(buffer, ref offset);
+                    return;
+                case Wire.Varint:
+                    ProtocolParser.ReadSkipVarInt(buffer, ref offset);
+                    return;
+                default:
+                    throw new NotImplementedException("Unknown wire type: " + key.WireType);
+            }
+        }
+
+        /// <summary>
+        /// Read the value for an unknown key as bytes.
+        /// Used to preserve unknown keys during deserialization.
+        /// Requires the message option preserveunknown=true.
+        /// </summary>
+        public static byte[] ReadValueBytes(byte[] buffer, ref int offset, Key key)
+        {
+            byte[] b;
+
+            switch (key.WireType)
+            {
+                case Wire.Fixed32:
+                    b = new byte[4];
+                    Array.Copy(buffer, offset, b, 0, 4);
+                    offset += 4;
+                    return b;
+                case Wire.Fixed64:
+                    b = new byte[8];
+                    Array.Copy(buffer, offset, b, 0, 8);
+                    offset += 8;
+                    return b;
+                case Wire.LengthDelimited:
+                    //Read and include length in value buffer
+                    uint length = ProtocolParser.ReadUInt32(buffer, ref offset);
+                    using (var ms = new MemoryStream())
+                    {
+                        //TODO: pass b directly to MemoryStream constructor or skip usage of it completely
+                        ProtocolParser.WriteUInt32(ms, length);
+                        b = new byte[length + ms.Length];
+                        ms.ToArray().CopyTo(b, 0);
+                        Array.Copy(buffer, offset, b, (int)ms.Length, b.Length - (int)ms.Length);
+                        offset += b.Length - (int) ms.Length;
+                        return b;
+                    }
+                case Wire.Varint:
+                    return ProtocolParser.ReadVarIntBytes(buffer, ref offset);
+                default:
+                    throw new NotImplementedException("Unknown wire type: " + key.WireType);
+            }
+        }
+
     }
 }
 

@@ -1,13 +1,14 @@
 using System;
+using System.IO;
 using SilentOrbit.Code;
 
 namespace SilentOrbit.ProtocolBuffers
 {
-    class MessageSerializer
+    internal class MessageSerializer
     {
-        readonly CodeWriter cw;
-        readonly Options options;
-        readonly FieldSerializer fieldSerializer;
+        private readonly CodeWriter cw;
+        private readonly Options options;
+        private readonly FieldSerializer fieldSerializer;
 
         public MessageSerializer(CodeWriter cw, Options options)
         {
@@ -26,7 +27,7 @@ namespace SilentOrbit.ProtocolBuffers
             }
             else
             {
-                if(options.SerializableAttributes)
+                if (options.SerializableAttributes)
                     cw.Attribute("System.Serializable");
                 cw.Bracket(m.OptionAccess + " partial " + m.OptionType + " " + m.SerializerType);
             }
@@ -44,251 +45,290 @@ namespace SilentOrbit.ProtocolBuffers
             return;
         }
 
-        void GenerateReader(ProtoMessage m)
+        public static string GetReadByte(bool stream)
         {
-            #region Helper Deserialize Methods
+            return stream ? "stream.ReadByte()" : "offset == buffer.Length ? -1 : buffer[offset++]";
+        }
+
+        public static string GetPosition(bool stream)
+        {
+            return stream ? "stream.Position" : "offset";
+        }
+
+        public static string GetTarget(bool stream)
+        {
+            return stream ? "stream" : "buffer, ref offset";
+        }
+
+        public static string GetTargetDeclaration(bool stream)
+        {
+            return stream ? "Stream stream" : "byte[] buffer, ref int offset";
+        }
+
+        private void GenerateReader(ProtoMessage m)
+        {
             string refstr = (m.OptionType == "struct") ? "ref " : "";
+
             if (m.OptionType != "interface")
             {
-                cw.Summary("Helper: create a new instance to deserializing into");
-                cw.Bracket(m.OptionAccess + " static " + m.CsType + " Deserialize(Stream stream)");
-                cw.WriteLine("var instance = new " + m.CsType + "();");
-                cw.WriteLine("Deserialize(stream, " + refstr + "instance);");
-                cw.WriteLine("return instance;");
-                cw.EndBracketSpace();
-
-                cw.Summary("Helper: create a new instance to deserializing into");
-                cw.Bracket(m.OptionAccess + " static " + m.CsType + " DeserializeLengthDelimited(Stream stream)");
-                cw.WriteLine("var instance = new " + m.CsType + "();");
-                cw.WriteLine("DeserializeLengthDelimited(stream, " + refstr + "instance);");
-                cw.WriteLine("return instance;");
-                cw.EndBracketSpace();
-
-                cw.Summary("Helper: create a new instance to deserializing into");
-                cw.Bracket(m.OptionAccess + " static " + m.CsType + " DeserializeLength(Stream stream, int length)");
-                cw.WriteLine("var instance = new " + m.CsType + "();");
-                cw.WriteLine("DeserializeLength(stream, length, " + refstr + "instance);");
-                cw.WriteLine("return instance;");
-                cw.EndBracketSpace();
-
-                cw.Summary("Helper: put the buffer into a MemoryStream and create a new instance to deserializing into");
+                cw.Summary(
+                        "Helper: put the buffer into a MemoryStream and create a new instance to deserializing into");
                 cw.Bracket(m.OptionAccess + " static " + m.CsType + " Deserialize(byte[] buffer)");
                 cw.WriteLine("var instance = new " + m.CsType + "();");
-                cw.WriteLine("using (var ms = new MemoryStream(buffer))");
-                cw.WriteIndent("Deserialize(ms, " + refstr + "instance);");
+                cw.WriteLine("int offset = 0;");
+                cw.WriteLine("Deserialize(" + GetTarget(false) + ", " + refstr + "instance);");
                 cw.WriteLine("return instance;");
                 cw.EndBracketSpace();
             }
 
             cw.Summary("Helper: put the buffer into a MemoryStream before deserializing");
-            cw.Bracket(m.OptionAccess + " static " + m.FullCsType + " Deserialize(byte[] buffer, " + refstr + m.FullCsType + " instance)");
-            cw.WriteLine("using (var ms = new MemoryStream(buffer))");
-            cw.WriteIndent("Deserialize(ms, " + refstr + "instance);");
+            cw.Bracket(m.OptionAccess + " static " + m.FullCsType + " Deserialize(byte[] buffer, " + refstr +
+                       m.FullCsType + " instance)");
+            cw.WriteLine("int offset = 0;");
+            cw.WriteLine("Deserialize(" + GetTarget(false) + ", " + refstr + "instance);");
             cw.WriteLine("return instance;");
             cw.EndBracketSpace();
-            #endregion
 
-            string[] methods = new string[]
+            foreach (bool isStream in new[] {true, false})
             {
-                "Deserialize", //Default old one
-                "DeserializeLengthDelimited", //Start by reading length prefix and stay within that limit
-                "DeserializeLength", //Read at most length bytes given by argument
-            };
-
-            //Main Deserialize
-            foreach (string method in methods)
-            {
-                if (method == "Deserialize")
+                if (m.OptionType != "interface")
                 {
-                    cw.Summary("Takes the remaining content of the stream and deserialze it into the instance.");
-                    cw.Bracket(m.OptionAccess + " static " + m.FullCsType + " " + method + "(Stream stream, " + refstr + m.FullCsType + " instance)");
+                    cw.Summary("Helper: create a new instance to deserializing into");
+                    cw.Bracket(m.OptionAccess + " static " + m.CsType + " Deserialize(" + GetTargetDeclaration(isStream) + ")");
+                    cw.WriteLine("var instance = new " + m.CsType + "();");
+                    cw.WriteLine("Deserialize(" + GetTarget(isStream) + ", " + refstr + "instance);");
+                    cw.WriteLine("return instance;");
+                    cw.EndBracketSpace();
+
+                    cw.Summary("Helper: create a new instance to deserializing into");
+                    cw.Bracket(m.OptionAccess + " static " + m.CsType + " DeserializeLengthDelimited(" + GetTargetDeclaration(isStream) + ")");
+                    cw.WriteLine("var instance = new " + m.CsType + "();");
+                    cw.WriteLine("DeserializeLengthDelimited(" + GetTarget(isStream) + ", " + refstr + "instance);");
+                    cw.WriteLine("return instance;");
+                    cw.EndBracketSpace();
+
+                    cw.Summary("Helper: create a new instance to deserializing into");
+                    cw.Bracket(m.OptionAccess + " static " + m.CsType + " DeserializeLength(" + GetTargetDeclaration(isStream) + ", int length)");
+                    cw.WriteLine("var instance = new " + m.CsType + "();");
+                    cw.WriteLine("DeserializeLength(" + GetTarget(isStream) + ", length, " + refstr + "instance);");
+                    cw.WriteLine("return instance;");
+                    cw.EndBracketSpace();
                 }
-                else if (method == "DeserializeLengthDelimited")
-                {
-                    cw.Summary("Read the VarInt length prefix and the given number of bytes from the stream and deserialze it into the instance.");
-                    cw.Bracket(m.OptionAccess + " static " + m.FullCsType + " " + method + "(Stream stream, " + refstr + m.FullCsType + " instance)");
-                }
-                else if (method == "DeserializeLength")
-                {
-                    cw.Summary("Read the given number of bytes from the stream and deserialze it into the instance.");
-                    cw.Bracket(m.OptionAccess + " static " + m.FullCsType + " " + method + "(Stream stream, int length, " + refstr + m.FullCsType + " instance)");
-                }
-                else
-                    throw new NotImplementedException();
 
-                if (m.IsUsingBinaryWriter)
-                    cw.WriteLine("var br = new BinaryReader(stream);");
-
-                //Prepare List<> and default values
-                foreach (Field f in m.Fields.Values)
+                string[] methods = new string[]
                 {
-                    if (f.OptionDeprecated)
-                        cw.WritePragma("warning disable 612");
+                    "Deserialize", //Default old one
+                    "DeserializeLengthDelimited", //Start by reading length prefix and stay within that limit
+                    "DeserializeLength", //Read at most length bytes given by argument
+                };
 
-                    if (f.Rule == FieldRule.Repeated)
+
+                //Main Deserialize
+                foreach (string method in methods)
+                {
+                    if (method == "Deserialize")
                     {
-                        if (f.OptionReadOnly == false)
-                        {
-                            //Initialize lists of the custom DateTime or TimeSpan type.
-                            string csType = f.ProtoType.FullCsType;
-                            if (f.OptionCodeType != null)
-                                csType = f.OptionCodeType;
-
-                            cw.WriteLine("if (instance." + f.CsName + " == null)");
-                            cw.WriteIndent("instance." + f.CsName + " = new List<" + csType + ">();");
-                        }
+                        cw.Summary("Takes the remaining content of the stream and deserialze it into the instance.");
+                        cw.Bracket(m.OptionAccess + " static " + m.FullCsType + " " + method + "(" +
+                                   GetTargetDeclaration(isStream) + ", " +
+                                   refstr + m.FullCsType + " instance)");
                     }
-                    else if (f.OptionDefault != null)
+                    else if (method == "DeserializeLengthDelimited")
                     {
-                        cw.WriteLine("instance." + f.CsName + " = " + f.FormatForTypeAssignment() + ";");
+                        cw.Summary(
+                            "Read the VarInt length prefix and the given number of bytes from the stream and deserialze it into the instance.");
+                        cw.Bracket(m.OptionAccess + " static " + m.FullCsType + " " + method + "(" +
+                                   GetTargetDeclaration(isStream) + ", " +
+                                   refstr + m.FullCsType + " instance)");
                     }
-                    else if ((f.Rule == FieldRule.Optional) && !options.Nullable)
+                    else if (method == "DeserializeLength")
                     {
-                        if (f.ProtoType is ProtoEnum)
-                        {
-                            ProtoEnum pe = f.ProtoType as ProtoEnum;
-                            //the default value is the first value listed in the enum's type definition
-                            foreach (var kvp in pe.Enums)
-                            {
-                                cw.WriteLine("instance." + f.CsName + " = " + pe.FullCsType + "." + kvp.Name + ";");
-                                break;
-                            }
-                        }
+                        cw.Summary("Read the given number of bytes from the stream and deserialze it into the instance.");
+                        cw.Bracket(m.OptionAccess + " static " + m.FullCsType + " " + method +
+                                   "(" + GetTargetDeclaration(isStream) + ", int length, " + refstr + m.FullCsType +
+                                   " instance)");
                     }
+                    else
+                        throw new NotImplementedException();
 
-                    if (f.OptionDeprecated)
-                        cw.WritePragma("warning restore 612");
-                }
 
-                if (method == "DeserializeLengthDelimited")
-                {
-                    //Important to read stream position after we have read the length field
-                    cw.WriteLine("long limit = " + ProtocolParser.Base + ".ReadUInt32(stream);");
-                    cw.WriteLine("limit += stream.Position;");
-                }
-                if (method == "DeserializeLength")
-                {
-                    //Important to read stream position after we have read the length field
-                    cw.WriteLine("long limit = stream.Position + length;");
-                }
-
-                cw.WhileBracket("true");
-
-                if (method == "DeserializeLengthDelimited" || method == "DeserializeLength")
-                {
-                    cw.IfBracket("stream.Position >= limit");
-                    cw.WriteLine("if (stream.Position == limit)");
-                    cw.WriteIndent("break;");
-                    cw.WriteLine("else");
-                    cw.WriteIndent("throw new global::SilentOrbit.ProtocolBuffers.ProtocolBufferException(\"Read past max limit\");");
-                    cw.EndBracket();
-                }
-
-                cw.WriteLine("int keyByte = stream.ReadByte();");
-                cw.WriteLine("if (keyByte == -1)");
-                if (method == "Deserialize")
-                    cw.WriteIndent("break;");
-                else
-                    cw.WriteIndent("throw new System.IO.EndOfStreamException();");
-
-                //Determine if we need the lowID optimization
-                bool hasLowID = false;
-                foreach (Field f in m.Fields.Values)
-                {
-                    if (f.ID < 16)
-                    {
-                        hasLowID = true;
-                        break;
-                    }
-                }
-
-                if (hasLowID)
-                {
-                    cw.Comment("Optimized reading of known fields with field ID < 16");
-                    cw.Switch("keyByte");
+                    //Prepare List<> and default values
                     foreach (Field f in m.Fields.Values)
                     {
-                        if (f.ID >= 16)
+                        if (f.OptionDeprecated)
+                            cw.WritePragma("warning disable 612");
+
+                        if (f.Rule == FieldRule.Repeated)
+                        {
+                            if (f.OptionReadOnly == false)
+                            {
+                                //Initialize lists of the custom DateTime or TimeSpan type.
+                                string csType = f.ProtoType.FullCsType;
+                                if (f.OptionCodeType != null)
+                                    csType = f.OptionCodeType;
+
+                                cw.WriteLine("if (instance." + f.CsName + " == null)");
+                                cw.WriteIndent("instance." + f.CsName + " = new List<" + csType + ">();");
+                            }
+                        }
+                        else if (f.OptionDefault != null)
+                        {
+                            cw.WriteLine("instance." + f.CsName + " = " + f.FormatForTypeAssignment() + ";");
+                        }
+                        else if ((f.Rule == FieldRule.Optional) && !options.Nullable)
+                        {
+                            if (f.ProtoType is ProtoEnum)
+                            {
+                                ProtoEnum pe = f.ProtoType as ProtoEnum;
+                                //the default value is the first value listed in the enum's type definition
+                                foreach (var kvp in pe.Enums)
+                                {
+                                    cw.WriteLine("instance." + f.CsName + " = " + pe.FullCsType + "." + kvp.Name + ";");
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (f.OptionDeprecated)
+                            cw.WritePragma("warning restore 612");
+                    }
+
+                    if (method == "DeserializeLengthDelimited")
+                    {
+                        //Important to read stream position after we have read the length field
+                        cw.WriteLine("long limit = " + ProtocolParser.Base + ".ReadUInt32(" + GetTarget(isStream) + ");");
+                        cw.WriteLine("limit += " + GetPosition(isStream) + ";");
+                    }
+                    if (method == "DeserializeLength")
+                    {
+                        //Important to read stream position after we have read the length field
+                        cw.WriteLine("long limit = " + GetPosition(isStream) + " + length;");
+                    }
+
+                    cw.WhileBracket("true");
+
+                    if (method == "DeserializeLengthDelimited" || method == "DeserializeLength")
+                    {
+                        cw.IfBracket("" + GetPosition(isStream) + " >= limit");
+                        cw.WriteLine("if (" + GetPosition(isStream) + " == limit)");
+                        cw.WriteIndent("break;");
+                        cw.WriteLine("else");
+                        cw.WriteIndent(
+                            "throw new global::SilentOrbit.ProtocolBuffers.ProtocolBufferException(\"Read past max limit\");");
+                        cw.EndBracket();
+                    }
+
+                    cw.WriteLine("int keyByte = " + GetReadByte(isStream) + ";");
+
+                    //Determine if we need the lowID optimization
+                    bool hasLowID = false;
+                    foreach (Field f in m.Fields.Values)
+                    {
+                        if (f.ID < 16)
+                        {
+                            hasLowID = true;
+                            break;
+                        }
+                    }
+
+                    if (hasLowID)
+                    {
+                        cw.Comment("Optimized reading of known fields with field ID < 16");
+                        cw.Switch("keyByte");
+                        foreach (Field f in m.Fields.Values)
+                        {
+                            if (f.ID >= 16)
+                                continue;
+
+                            if (f.OptionDeprecated)
+                                cw.WritePragma("warning disable 612");
+
+                            cw.Dedent();
+                            cw.Comment("Field " + f.ID + " " + f.WireType);
+                            cw.Indent();
+                            cw.Case(((f.ID << 3) | (int) f.WireType));
+                            if (fieldSerializer.FieldReader(f, isStream))
+                                cw.WriteLine("continue;");
+
+                            if (f.OptionDeprecated)
+                                cw.WritePragma("warning restore 612");
+                        }
+                        cw.SwitchEnd();
+                        cw.WriteLine();
+                    }
+                    cw.WriteLine("if (keyByte == -1)");
+                    if (method == "Deserialize")
+                        cw.WriteIndent("break;");
+                    else
+                        cw.WriteIndent("throw new System.IO.EndOfStreamException();");
+
+                    cw.WriteLine("var key = " + ProtocolParser.Base + ".ReadKey((byte)keyByte, " + GetTarget(isStream) +
+                                 ");");
+
+                    cw.WriteLine();
+
+                    cw.Comment("Reading field ID > 16 and unknown field ID/wire type combinations");
+                    cw.Switch("key.Field");
+                    cw.Case(0);
+                    cw.WriteLine(
+                        "throw new global::SilentOrbit.ProtocolBuffers.ProtocolBufferException(\"Invalid field id: 0, something went wrong in the stream\");");
+                    foreach (Field f in m.Fields.Values)
+                    {
+                        if (f.ID < 16)
                             continue;
+                        cw.Case(f.ID);
+                        //Makes sure we got the right wire type
+                        cw.WriteLine("if(key.WireType != global::SilentOrbit.ProtocolBuffers.Wire." + f.WireType + ")");
+                        cw.WriteIndent("break;"); //This can be changed to throw an exception for unknown formats.
 
                         if (f.OptionDeprecated)
                             cw.WritePragma("warning disable 612");
 
-                        cw.Dedent();
-                        cw.Comment("Field " + f.ID + " " + f.WireType);
-                        cw.Indent();
-                        cw.Case(((f.ID << 3) | (int)f.WireType));
-                        if (fieldSerializer.FieldReader(f))
+                        if (fieldSerializer.FieldReader(f, isStream))
                             cw.WriteLine("continue;");
 
                         if (f.OptionDeprecated)
                             cw.WritePragma("warning restore 612");
                     }
+                    cw.CaseDefault();
+                    if (m.OptionPreserveUnknown)
+                    {
+                        cw.WriteLine("if (instance.PreservedFields == null)");
+                        cw.WriteIndent(
+                            "instance.PreservedFields = new List<global::SilentOrbit.ProtocolBuffers.KeyValue>();");
+                        cw.WriteLine(
+                            "instance.PreservedFields.Add(new global::SilentOrbit.ProtocolBuffers.KeyValue(key, " +
+                            ProtocolParser.Base + ".ReadValueBytes(" + GetTarget(isStream) + ", key)));");
+                    }
+                    else
+                    {
+                        cw.WriteLine(ProtocolParser.Base + ".SkipKey(" + GetTarget(isStream) + ", key);");
+                    }
+                    cw.WriteLine("break;");
                     cw.SwitchEnd();
+                    cw.EndBracket();
+                    cw.WriteLine();
+
+                    if (m.OptionTriggers)
+                        cw.WriteLine("instance.AfterDeserialize();");
+                    cw.WriteLine("return instance;");
+                    cw.EndBracket();
                     cw.WriteLine();
                 }
-                cw.WriteLine("var key = " + ProtocolParser.Base + ".ReadKey((byte)keyByte, stream);");
-
-                cw.WriteLine();
-
-                cw.Comment("Reading field ID > 16 and unknown field ID/wire type combinations");
-                cw.Switch("key.Field");
-                cw.Case(0);
-                cw.WriteLine("throw new global::SilentOrbit.ProtocolBuffers.ProtocolBufferException(\"Invalid field id: 0, something went wrong in the stream\");");
-                foreach (Field f in m.Fields.Values)
-                {
-                    if (f.ID < 16)
-                        continue;
-                    cw.Case(f.ID);
-                    //Makes sure we got the right wire type
-                    cw.WriteLine("if(key.WireType != global::SilentOrbit.ProtocolBuffers.Wire." + f.WireType + ")");
-                    cw.WriteIndent("break;"); //This can be changed to throw an exception for unknown formats.
-
-                    if (f.OptionDeprecated)
-                        cw.WritePragma("warning disable 612");
-
-                    if (fieldSerializer.FieldReader(f))
-                        cw.WriteLine("continue;");
-
-                    if (f.OptionDeprecated)
-                        cw.WritePragma("warning restore 612");
-                }
-                cw.CaseDefault();
-                if (m.OptionPreserveUnknown)
-                {
-                    cw.WriteLine("if (instance.PreservedFields == null)");
-                    cw.WriteIndent("instance.PreservedFields = new List<global::SilentOrbit.ProtocolBuffers.KeyValue>();");
-                    cw.WriteLine("instance.PreservedFields.Add(new global::SilentOrbit.ProtocolBuffers.KeyValue(key, " + ProtocolParser.Base + ".ReadValueBytes(stream, key)));");
-                }
-                else
-                {
-                    cw.WriteLine(ProtocolParser.Base + ".SkipKey(stream, key);");
-                }
-                cw.WriteLine("break;");
-                cw.SwitchEnd();
-                cw.EndBracket();
-                cw.WriteLine();
-
-                if (m.OptionTriggers)
-                    cw.WriteLine("instance.AfterDeserialize();");
-                cw.WriteLine("return instance;");
-                cw.EndBracket();
-                cw.WriteLine();
             }
-
-            return;
         }
 
         /// <summary>
         /// Generates code for writing a class/message
         /// </summary>
-        void GenerateWriter(ProtoMessage m)
+        private void GenerateWriter(ProtoMessage m)
         {
             string stack = "global::SilentOrbit.ProtocolBuffers.ProtocolParser.Stack";
             if (options.ExperimentalStack != null)
             {
                 cw.WriteLine("[ThreadStatic]");
-                cw.WriteLine("static global::SilentOrbit.ProtocolBuffers.MemoryStreamStack stack = new " + options.ExperimentalStack + "();");
+                cw.WriteLine("static global::SilentOrbit.ProtocolBuffers.MemoryStreamStack stack = new " +
+                             options.ExperimentalStack + "();");
                 stack = "stack";
             }
 
@@ -300,8 +340,7 @@ namespace SilentOrbit.ProtocolBuffers
                 cw.WriteLine();
             }
             if (m.IsUsingBinaryWriter)
-                cw.WriteLine("var bw = new BinaryWriter(stream);");
-
+                cw.Using("var bw = new BinaryWriter(stream, Encoding.UTF8, true)");
             //Shared memorystream for all fields
             cw.WriteLine("var msField = " + stack + ".Pop();");
 
@@ -327,6 +366,9 @@ namespace SilentOrbit.ProtocolBuffers
                 cw.EndBracket();
                 cw.EndBracket();
             }
+            if (m.IsUsingBinaryWriter)
+                cw.EndBracket();
+
             cw.EndBracket();
             cw.WriteLine();
 
@@ -339,7 +381,8 @@ namespace SilentOrbit.ProtocolBuffers
             cw.EndBracket();
 
             cw.Summary("Helper: Serialize with a varint length prefix");
-            cw.Bracket(m.OptionAccess + " static void SerializeLengthDelimited(Stream stream, " + m.CsType + " instance)");
+            cw.Bracket(m.OptionAccess + " static void SerializeLengthDelimited(Stream stream, " + m.CsType +
+                       " instance)");
             cw.WriteLine("var data = SerializeToBytes(instance);");
             cw.WriteLine("global::SilentOrbit.ProtocolBuffers.ProtocolParser.WriteUInt32(stream, (uint)data.Length);");
             cw.WriteLine("stream.Write(data, 0, data.Length);");
@@ -347,4 +390,3 @@ namespace SilentOrbit.ProtocolBuffers
         }
     }
 }
-
